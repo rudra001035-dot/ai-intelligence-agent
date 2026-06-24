@@ -3,73 +3,110 @@ import requests
 import feedparser
 from google import genai
 
+# -----------------------------
+# ENV VARIABLES (SAFE CHECK)
+# -----------------------------
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# News Sources
+if not GEMINI_API_KEY or not BOT_TOKEN or not CHAT_ID:
+    raise Exception("Missing environment variables")
+
+# -----------------------------
+# NEWS SOURCES
+# -----------------------------
 feeds = [
     "https://news.google.com/rss?hl=en-IN&gl=IN&ceid=IN:en",
     "https://feeds.feedburner.com/TechCrunch",
 ]
 
+# -----------------------------
+# FETCH HEADLINES
+# -----------------------------
 headlines = []
 
 for url in feeds:
     try:
         feed = feedparser.parse(url)
-        for item in feed.entries[:15]:
-            headlines.append(item.title)
-    except:
-        pass
+        for item in feed.entries[:10]:
+            if item.title not in headlines:
+                headlines.append(item.title)
+    except Exception as e:
+        print("Feed error:", e)
 
-news_text = "\n".join(headlines[:50])
+# Limit noise
+headlines = headlines[:30]
 
+news_text = "\n".join(headlines)
+
+# -----------------------------
+# SMART PROMPT (UPGRADED)
+# -----------------------------
 prompt = f"""
-Create a Telegram-ready intelligence report.
+You are an AI Market Intelligence Analyst.
 
-Format:
+TASK:
+Create a HIGH QUALITY Telegram intelligence report.
+
+RULES:
+- Only keep high-impact global news
+- Remove useless or repetitive news
+- Focus on economy, war, crypto, AI, markets
+- Assign market impact properly
+
+FORMAT:
 
 📰 DAILY INTELLIGENCE REPORT
 
-🌍 World News
-💼 Business News
-🤖 AI & Technology
-🪙 Crypto & Markets
-
-For each story:
+🌍 WORLD NEWS
 - Headline
-- One-line summary
+- 1 line summary
 - Impact: 🟢 Bullish / 🔴 Bearish / ⚪ Neutral
+- Market: BTC / NIFTY / GOLD / OIL / GLOBAL
 
-At the end include:
+🪙 CRYPTO & MARKETS
+(same format)
 
-📈 Global Sentiment Score (1-10)
-🔥 Top Story of the Day
+📊 FINAL SUMMARY
+- Global Sentiment Score (1–10)
+- Market Bias (Risk-on / Risk-off)
+- Top Story
 
-Rules:
-- No introductions
-- No markdown
-- Professional formatting
-- Maximum 20 stories
+MAX 12 STORIES ONLY
 
-News:
+NEWS:
 {news_text}
 """
 
+# -----------------------------
+# GEMINI CALL
+# -----------------------------
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-response = client.models.generate_content(
-    model="gemini-2.5-flash",
-    contents=prompt
-)
+try:
+    response = client.models.generate_content(
+        model="gemini-2.5-flash",
+        contents=prompt
+    )
+    message = response.text
+except Exception as e:
+    message = f"AI Error: {str(e)}"
 
-message = response.text[:4000]
+# Limit Telegram message size
+message = message[:4000]
 
-requests.post(
-    f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-    json={
-        "chat_id": CHAT_ID,
-        "text": message
-    }
-)
+# -----------------------------
+# SEND TO TELEGRAM
+# -----------------------------
+try:
+    res = requests.post(
+        f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+        json={
+            "chat_id": CHAT_ID,
+            "text": message
+        }
+    )
+    print("Telegram sent:", res.status_code)
+except Exception as e:
+    print("Telegram error:", e)
